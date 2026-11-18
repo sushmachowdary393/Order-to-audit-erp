@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kaveri Foods — Order-to-Audit ERP</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <style>
+    :root {
+      --bg: #f8fafc; --card: #ffffff; --primary: #0f172a; --accent: #d97706;
+      --accent-dark: #b45309; --border: #e2e8f0; --text: #1e293b; --muted: #64748b;
+      --ok: #16a34a; --warn: #dc2626; --info: #2563eb;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    header {
+      background: var(--primary); color: #fff; padding: 12px 18px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
+    .badge { padding: 3px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fee2e2; color: #991b1b; }
+    .badge-info { background: #dbeafe; color: #1e40af; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    select, input, button {
+      padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem;
+    }
+    button { background: var(--accent); color: #fff; border: none; font-weight: 600; cursor: pointer; }
+    button:hover { background: var(--accent-dark); }
+    button.secondary { background: #334155; }
+    button.danger { background: var(--warn); }
+    button.success { background: var(--ok); }
+    nav {
+      display: flex; gap: 6px; overflow-x: auto; padding: 10px 18px;
+      background: #fff; border-bottom: 1px solid var(--border);
+    }
+    nav button { background: #f1f5f9; color: var(--text); white-space: nowrap; }
+    nav button.active { background: var(--primary); color: #fff; }
+    main { max-width: 1220px; margin: 16px auto; padding: 0 14px 40px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 16px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); margin-bottom: 16px;
+    }
+    .card h2, .card h3 { margin-top: 0; font-size: 1.05rem; }
+    .kpi-val { font-size: 1.5rem; font-weight: 700; margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { background: #f8fafc; font-weight: 600; color: var(--muted); }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .table-wrap { overflow-x: auto; }
+    .alert { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.88rem; }
+    .alert-warn { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .alert-ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .hidden { display: none !important; }
+    .line-row { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #f8fafc; }
+    .line-row label { display: block; font-size: 0.86rem; font-weight: 600; margin-bottom: 4px; color: var(--text); }
+    .line-row select, .line-row input { width: 100%; display: block; margin-bottom: 10px; background: #fff; }
+    .line-row input { margin-bottom: 0; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>🍘 Kaveri Foods <span style="font-weight:400;opacity:0.8">Order-to-Audit ERP</span></h1>
+  <div class="toolbar">
+    <span id="netStatus" class="badge badge-ok">Online</span>
+    <span id="offlineQueueBadge" class="badge badge-info hidden">0 Offline Orders</span>
+    <select id="roleSwitcher" title="Switch Role">
+      <option value="salesman_a">Salesman A — Karthik (Mobile)</option>
+      <option value="salesman_b">Salesman B — Suresh (Mobile)</option>
+      <option value="admin">Factory Admin — Meenakshi</option>
+      <option value="production">Production Supervisor — Murugan</option>
+      <option value="auditor">Accountant / Auditor — CA Raghavan</option>
+      <option value="owner">Owner — Anand</option>
+    </select>
+    <button class="secondary" onclick="syncOfflineQueue()">Sync Offline</button>
+    <button class="danger" onclick="resetBenchmark()">Reset Benchmark Data</button>
+  </div>
+</header>
+
+<nav id="tabBar"></nav>
+<main id="appView"></main>
+
+<script>
+const API = "";
+let currentUser = "salesman_a";
+let masters = { items: [], customers: [], boms: [] };
+let activeTab = "";
+let selectedBomIndex = 0;
+
+const ROLE_TABS = {
+  salesman_a: ["mobile_order", "my_orders", "masters_catalog"],
+  salesman_b: ["mobile_order", "my_orders", "masters_catalog"],
+  admin: ["orders_billing", "invoices_payments", "purchases", "stock", "masters_catalog", "reports", "audit_trail"],
+  production: ["production", "purchases", "stock"],
+  auditor: ["reports", "stock", "audit_trail"],
+  owner: ["owner_dashboard", "reports", "stock", "masters_catalog", "orders_billing", "production"]
+};
+
+const TAB_LABELS = {
+  mobile_order: "📱 New Field Order",
+  my_orders: "📋 My Orders & Sales",
+  masters_catalog: "🏪 Retailers & Products",
+  orders_billing: "✅ Order Approval & GST Billing",
+  invoices_payments: "🧾 Invoices & Collections",
+  purchases: "🚚 Raw Material Purchase",
+  production: "⚙️ Production Run & BOM",
+  stock: "📦 Stock Summary & Ledger",
+  reports: "📊 Monthly Auditor Reports",
+  owner_dashboard: "📈 Owner Summary",
+  audit_trail: "🔒 Audit Trail"
+};
+
+function headers() {
+  return { "Content-Type": "application/json", "X-Username": currentUser };
+}
+
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(API + url, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Request failed");
+  }
+  return res.json();
+}
+
+function getOfflineQueue() {
+  return JSON.parse(localStorage.getItem("kaveri_offline_orders") || "[]");
+}
+function saveOfflineQueue(q) {
+  localStorage.setItem("kaveri_offline_orders", JSON.stringify(q));
+  const b = document.getElementById("offlineQueueBadge");
+  if (q.length > 0) { b.textContent = `${q.length} Queued Offline`; b.classList.remove("hidden"); }
+  else { b.classList.add("hidden"); }
+}
+
+async function syncOfflineQueue() {
+  const q = getOfflineQueue();
+  if (!q.length) return alert("No offline orders pending sync.");
+  const remaining = [];
+  for (const item of q) {
+    try {
+      await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Username": item.username },
+        body: JSON.stringify(item.payload)
+      });
+    } catch (e) { remaining.push(item); }
+  }
+  saveOfflineQueue(remaining);
+  alert(`Synced ${q.length - remaining.length} offline order(s)!`);
+  render();
+}
+
+window.addEventListener("online", () => {
+  document.getElementById("netStatus").textContent = "Online";
+  document.getElementById("netStatus").className = "badge badge-ok";
+  syncOfflineQueue();
+});
+window.addEventListener("offline", () => {
+  document.getElementById("netStatus").textContent = "Offline Mode";
+  document.getElementById("netStatus").className = "badge badge-warn";
+});
+
+document.getElementById("roleSwitcher").addEventListener("change", async (e) => {
+  currentUser = e.target.value;
+  activeTab = ROLE_TABS[currentUser][0];
+  await loadMasters();
+  renderTabs();
+  render();
+});
+
+async function loadMasters() {
+  masters = await apiFetch("/api/masters");
+}
+
+async function resetBenchmark() {
+  if (!confirm("Reset database to Section 5 Benchmark + Expanded Master Data?")) return;
+  await apiFetch("/api/system/reset-benchmark", { method: "POST" });
+  await loadMasters();
+  render();
+  alert("Master data restored.");
+}
+
+function renderTabs() {
+  const tabs = ROLE_TABS[currentUser];
+  if (!tabs.includes(activeTab)) activeTab = tabs[0];
+  document.getElementById("tabBar").innerHTML = tabs.map(t =>
+    `<button class="${t === activeTab ? 'active' : ''}" onclick="switchTab('${t}')">${TAB_LABELS[t]}</button>`
+  ).join("");
+}
+
+function switchTab(t) {
+  activeTab = t;
+  renderTabs();
+  render();
+}
+
+async function render() {
+  const el = document.getElementById("appView");
+  if (activeTab === "mobile_order") return renderMobileOrder(el);
+  if (activeTab === "my_orders") return renderMyOrders(el);
+  if (activeTab === "masters_catalog") return renderMastersCatalog(el);
+  if (activeTab === "orders_billing") return renderOrdersBilling(el);
+  if (activeTab === "invoices_payments") return renderInvoicesPayments(el);
+  if (activeTab === "purchases") return renderPurchases(el);
+  if (activeTab === "production") return renderProduction(el);
+  if (activeTab === "stock") return renderStock(el);
+  if (activeTab === "reports") return renderReports(el);
+  if (activeTab === "owner_dashboard") return renderOwnerDashboard(el);
+  if (activeTab === "audit_trail") return renderAuditTrail(el);
+}
+
+// 1. Mobile Salesman Multi-Line Order Entry
+function productOptionsHtml() {
+  const fgs = masters.items.filter(i => i.item_type === "finished_good");
+  return fgs.map(p =>
+    `<option value="${p.id}">${p.name} — ₹${p.selling_price_rupees}/pkt (+${p.gst_rate_pct}% GST) [Stock: ${p.current_stock}]</option>`
+  ).join("");
+}
+
+function addOrderLineRow() {
+  const container = document.getElementById("orderLinesContainer");
+  const div = document.createElement("div");
+  div.className = "line-row";
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <label style="margin:0">Product</label>
+      <button type="button" class="danger" style="padding:4px 8px;font-size:0.78rem" onclick="this.closest('.line-row').remove()">Remove</button>
+    </div>
+    <select class="ord-item">${productOptionsHtml()}</select>
+    <label>Quantity (Packets)</label>
+    <input class="ord-qty" type="number" value="20" min="1" placeholder="Enter packets" />
+  `;
+  container.appendChild(div);
+}
+
+function renderMobileOrder(el) {
+  el.innerHTML = `
+    <div class="card" style="max-width:620px;margin:auto">
+      <h2>📱 Field Order Entry (${currentUser})</h2>
+      <label><b>Customer (Retailer / Distributor)</b></label><br/>
+      <select id="ordCust" style="width:100%;margin:6px 0 14px">
+        ${masters.customers.map(c => `<option value="${c.id}">[${c.customer_type}] ${c.name} — ${c.state_name}</option>`).join("")}
+      </select>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <label><b>Order Items</b></label>
+        <button type="button" class="secondary" onclick="addOrderLineRow()">+ Add Another Product</button>
+      </div>
+      <div id="orderLinesContainer">
+        <div class="line-row">
+          <label>Product</label>
+          <select class="ord-item">${productOptionsHtml()}</select>
+          <label>Quantity (Packets)</label>
+          <input class="ord-qty" type="number" value="150" min="1" placeholder="Enter packets" />
+        </div>
+      </div>
+      <label>Notes / Route</label><br/>
+      <input id="ordNotes" type="text" placeholder="Optional delivery note" style="width:100%;margin:6px 0 14px" />
+      <button style="width:100%;padding:12px" onclick="submitFieldOrder()">Submit Order to Factory</button>
+    </div>`;
+}
+
+async function submitFieldOrder() {
+  const itemEls = document.querySelectorAll(".ord-item");
+  const qtyEls = document.querySelectorAll(".ord-qty");
+  const lines = [];
+  itemEls.forEach((sel, idx) => {
+    const q = parseFloat(qtyEls[idx].value);
+    if (q > 0) lines.push({ item_id: parseInt(sel.value), qty_packets: q });
+  });
+  if (!lines.length) return alert("Please enter at least one product quantity.");
+
+  const payload = {
+    customer_id: parseInt(document.getElementById("ordCust").value),
+    lines,
+    notes: document.getElementById("ordNotes").value,
+    client_offline_uuid: "offline-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7)
+  };
+  if (!navigator.onLine) {
+    const q = getOfflineQueue();
+    q.push({ username: currentUser, payload });
+    saveOfflineQueue(q);
+    alert("Network offline: Order saved locally and will auto-sync when connection returns.");
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/orders", { method: "POST", body: JSON.stringify(payload) });
+    alert(`Order ${res.order_number} submitted!`);
+    switchTab("my_orders");
+  } catch (e) {
+    const q = getOfflineQueue();
+    q.push({ username: currentUser, payload });
+    saveOfflineQueue(q);
+    alert("Saved offline due to network error: " + e.message);
+  }
+}
+
+async function renderMyOrders(el) {
+  const data = await apiFetch("/api/orders");
+  el.innerHTML = `<div class="card"><h2>📋 My Submitted Orders</h2><div class="table-wrap"><table>
+    <thead><tr><th>Order #</th><th>Date</th><th>Customer</th><th>Items</th><th>Status</th></tr></thead>
+    <tbody>${data.orders.map(o => `<tr>
+      <td><b>${o.order_number}</b></td><td>${o.order_date}</td><td>${o.customer_name}</td>
+      <td>${o.lines.map(l => `${l.item_name} × ${l.qty_packets} pkts (₹${l.line_total_rupees})`).join("<br/>")}</td>
+      <td><span class="badge badge-info">${o.status.toUpperCase()}</span></td>
+    </tr>`).join("")}</tbody></table></div></div>`;
+}
+
+// Retailers & Products Directory
+function snackCategory(name) {
+  const n = name.toLowerCase();
+  if (n.includes("murukku")) return "Murukku";
+  if (n.includes("mixture")) return "Mixture";
+  if (n.includes("chips")) return "Chips";
+  return "Sweets";
+}
+
+function renderMastersCatalog(el) {
+  const fgs = masters.items.filter(i => i.item_type === "finished_good");
+  el.innerHTML = `
+    <div class="card">
+      <h2>🏪 Retailers & Distributors Directory (${masters.customers.length})</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>State (Place of Supply)</th><th>GSTIN</th><th>Address</th></tr></thead>
+        <tbody>${masters.customers.map(c => `<tr>
+          <td><b>${c.code}</b></td>
+          <td><b>${c.name}</b></td>
+          <td><span class="badge badge-info">${c.customer_type}</span></td>
+          <td>${c.state_name} (${c.state_code}) — ${c.state_code === '33' ? 'CGST+SGST' : 'IGST'}</td>
+          <td>${c.gstin || '—'}</td>
+          <td>${c.address || ''}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>🍘 South Indian Snacks & Sweets Catalogue (${fgs.length} Products)</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>SKU</th><th>Category</th><th>Product Name</th><th>Pack Size</th><th>HSN</th><th>GST %</th><th>Selling Price</th><th>Current Stock</th></tr></thead>
+        <tbody>${fgs.map(p => `<tr>
+          <td><b>${p.sku}</b></td>
+          <td><span class="badge badge-info">${snackCategory(p.name)}</span></td>
+          <td><b>${p.name}</b></td>
+          <td>${p.pack_size_grams} g (${p.packets_per_carton} pkts/carton)</td>
+          <td>${p.hsn_code}</td>
+          <td>${p.gst_rate_pct}%</td>
+          <td class="num"><b>₹${p.selling_price_rupees.toFixed(2)}</b></td>
+          <td class="num"><span class="badge ${p.current_stock > p.reorder_level ? 'badge-ok' : 'badge-warn'}">${p.current_stock} pkts</span></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
+}
+
+// 2. Admin Order Verification & GST Billing
+async function renderOrdersBilling(el) {
+  const data = await apiFetch("/api/orders");
+  el.innerHTML = `<div class="card"><h2>✅ Incoming Orders & Stock Verification</h2><div class="table-wrap"><table>
+    <thead><tr><th>Order #</th><th>Customer & Place of Supply</th><th>Lines</th><th>Stock Availability Check</th><th>Status / Action</th></tr></thead>
+    <tbody>${data.orders.map(o => {
+      const sc = o.stock_check;
+      const stockHtml = sc.lines.map(l => l.sufficient
+        ? `<span class="badge badge-ok">${l.item_name}: OK (${l.available_qty} avail)</span>`
+        : `<span class="badge badge-warn">${l.item_name}: SHORT ${l.shortage_qty} pkts (Avail ${l.available_qty})</span>`
+      ).join("<br/>");
+      const btn = o.status === "submitted"
+        ? (sc.all_sufficient
+            ? `<button class="success" onclick="approveOrder(${o.id})">Approve & Generate GST Invoice</button>`
+            : `<button class="danger" onclick="alert('Insufficient stock! Produce more batches before invoicing.')">Blocked (Short Stock)</button>`)
+        : `<span class="badge badge-info">${o.status.toUpperCase()}</span>`;
+      return `<tr>
+        <td><b>${o.order_number}</b><br/><small>${o.salesman_name}</small></td>
+        <td>${o.customer_name}<br/><small>${sc.place_of_supply} • <b>${sc.tax_regime}</b></small></td>
+        <td>${o.lines.map(l => `${l.item_name}: <b>${l.qty_packets}</b> @ ₹${l.unit_price_rupees}`).join("<br/>")}</td>
+        <td>${stockHtml}</td>
+        <td>${btn}</td>
+      </tr>`;
+    }).join("")}</tbody></table></div></div>`;
+}
+
+async function approveOrder(id) {
+  try {
+    const res = await apiFetch(`/api/orders/${id}/approve-invoice`, { method: "POST", body: JSON.stringify({}) });
+    alert(`Generated ${res.invoice_number}
+Taxable: ₹${res.taxable_rupees} | CGST: ₹${res.cgst_rupees} | SGST: ₹${res.sgst_rupees} | IGST: ₹${res.igst_rupees}
+Grand Total: ₹${res.grand_total_rupees}`);
+    await loadMasters();
+    switchTab("invoices_payments");
+  } catch (e) { alert(e.message); }
+}
+
+// 3. Invoices, Dispatch, PDF Download & Collections
+async function renderInvoicesPayments(el) {
+  const data = await apiFetch("/api/invoices");
+  el.innerHTML = `<div class="card"><h2>🧾 GST Invoices, Dispatch & Customer Collections</h2><div class="table-wrap"><table>
+    <thead><tr><th>Invoice #</th><th>Customer</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Paid / Due</th><th>Actions</th></tr></thead>
+    <tbody>${data.invoices.map(i => `<tr>
+      <td><b>${i.invoice_number}</b><br/><small>${i.invoice_date}</small></td>
+      <td>${i.customer_name}<br/><small>${i.place_of_supply}</small></td>
+      <td class="num">₹${i.taxable_rupees.toFixed(2)}</td>
+      <td class="num">₹${i.cgst_rupees.toFixed(2)}</td>
+      <td class="num">₹${i.sgst_rupees.toFixed(2)}</td>
+      <td class="num">₹${i.igst_rupees.toFixed(2)}</td>
+      <td class="num"><b>₹${i.grand_total_rupees.toFixed(2)}</b></td>
+      <td class="num">Paid: ₹${i.paid_rupees.toFixed(2)}<br/><b style="color:var(--warn)">Due: ₹${i.outstanding_rupees.toFixed(2)}</b></td>
+      <td>
+        <a href="/api/invoices/${i.id}/pdf" target="_blank"><button class="secondary">PDF</button></a>
+        ${i.status === "invoiced" ? `<button class="success" onclick="dispatchInv(${i.id})">Dispatch</button>` : `<span class="badge badge-ok">${i.status}</span>`}
+        ${i.outstanding_rupees > 0 ? `<button onclick="recordPmt(${i.id}, ${i.outstanding_rupees})">Record Payment</button>` : ""}
+      </td>
+    </tr>`).join("")}</tbody></table></div></div>`;
+}
+
+async function dispatchInv(id) {
+  await apiFetch(`/api/invoices/${id}/dispatch`, { method: "POST" });
+  await loadMasters();
+  render();
+  alert("Dispatched! Finished goods stock deducted in ledger.");
+}
+
+async function recordPmt(invId, due) {
+  const amt = prompt(`Enter payment received (Outstanding: ₹${due}):`, Math.min(4000, due));
+  if (!amt) return;
+  await apiFetch("/api/payments", { method: "POST", body: JSON.stringify({ invoice_id: invId, amount_rupees: parseFloat(amt), mode: "NEFT/UPI" }) });
+  render();
+}
+
+// 4. Purchases
+function renderPurchases(el) {
+  const rms = masters.items.filter(i => i.item_type !== "finished_good");
+  el.innerHTML = `<div class="card" style="max-width:560px"><h2>🚚 Record Raw Material / Packaging Purchase</h2>
+    <label>Supplier Name</label><input id="purSup" value="Cauvery Agro Flour Mills" style="width:100%;margin:4px 0 10px"/>
+    <label>Supplier Invoice Ref</label><input id="purRef" value="INV-CA-2026-01" style="width:100%;margin:4px 0 10px"/>
+    <label>Item</label><select id="purItem" style="width:100%;margin:4px 0 10px">
+      ${rms.map(i => `<option value="${i.id}">${i.name} (${i.base_unit}) — Current Stock: ${i.current_stock}</option>`).join("")}
+    </select>
+    <label>Quantity</label><input id="purQty" type="number" value="60" style="width:100%;margin:4px 0 10px"/>
+    <label>Rate per Unit (₹ excl. GST)</label><input id="purRate" type="number" step="0.01" value="45" style="width:100%;margin:4px 0 14px"/>
+    <button onclick="savePurchase()">Post Purchase to Stock Ledger</button>
+  </div>`;
+}
+
+async function savePurchase() {
+  const payload = {
+    supplier_name: document.getElementById("purSup").value,
+    invoice_ref: document.getElementById("purRef").value,
+    items: [{
+      item_id: parseInt(document.getElementById("purItem").value),
+      qty: parseFloat(document.getElementById("purQty").value),
+      rate_rupees: parseFloat(document.getElementById("purRate").value)
+    }]
+  };
+  const res = await apiFetch("/api/purchases", { method: "POST", body: JSON.stringify(payload) });
+  await loadMasters();
+  alert(`Posted Purchase ${res.purchase_number}!`);
+  switchTab("stock");
+}
+
+// 5. Production Run & Overheads (Supports selecting any of the 6 snack product BOMs)
+async function renderProduction(el) {
+  const bom = masters.boms[selectedBomIndex] || masters.boms[0];
+  const rep = await apiFetch("/api/reports/monthly");
+  const isBenchmarkMurukku = bom.finished_item_name === "Murukku 200 g";
+  const defOut = isBenchmarkMurukku ? 188 : bom.expected_yield_packets;
+
+  el.innerHTML = `
+    <div class="card">
+      <h2>⚙️ Log Production Run & BOM Consumption</h2>
+      <div style="margin-bottom:12px">
+        <label><b>Select Finished Product Recipe (BOM):</b></label><br/>
+        <select style="width:100%;max-width:440px;margin-top:4px" onchange="selectedBomIndex = parseInt(this.value); render();">
+          ${masters.boms.map((b, idx) => `<option value="${idx}" ${idx === selectedBomIndex ? 'selected' : ''}>${b.finished_item_name} (1 Batch = ${b.expected_yield_packets} pkts)</option>`).join("")}
+        </select>
+      </div>
+      <div class="grid">
+        <div><label>Batch Multiplier</label><input id="prMult" type="number" step="0.5" value="1" style="width:100%"/></div>
+        <div><label>Actual Good Output (Packets)</label><input id="prOut" type="number" value="${defOut}" style="width:100%"/></div>
+        <div><label>Direct Labour (₹)</label><input id="prLab" type="number" value="1200" style="width:100%"/></div>
+        <div><label>Gas, Power & Overheads (₹)</label><input id="prOvh" type="number" value="600" style="width:100%"/></div>
+      </div>
+      <table><thead><tr><th>Component</th><th>Standard BOM</th><th>Good Used</th><th>Damaged / Wastage</th></tr></thead>
+      <tbody>${bom.lines.map(l => {
+        const defGood = isBenchmarkMurukku
+          ? (l.component_name.includes("Oil") ? 10.5 : (l.component_name.includes("200 g Printed Pouch") ? 188 : (l.component_name.includes("Carton") ? 9 : l.qty_per_batch)))
+          : l.qty_per_batch;
+        const defDmg = (isBenchmarkMurukku && l.component_name.includes("200 g Printed Pouch")) ? 6 : 0;
+        return `<tr>
+          <td>${l.component_name} (${l.unit})</td>
+          <td>${l.qty_per_batch} ${l.unit}</td>
+          <td><input class="pr-good" data-id="${l.component_item_id}" type="number" step="0.01" value="${defGood}"/></td>
+          <td><input class="pr-dmg" data-id="${l.component_item_id}" type="number" step="0.01" value="${defDmg}"/></td>
+        </tr>`;
+      }).join("")}</tbody></table>
+      <br/><button onclick="postProductionRun(${bom.finished_item_id})">Post Production Run & Update Stock</button>
+    </div>
+    <div class="card"><h3>Posted Production Runs & Costing</h3>
+      <div class="table-wrap"><table><thead><tr><th>Run #</th><th>Product</th><th>Expected</th><th>Actual</th><th>Yield Var</th><th>Material</th><th>Labour+Ovh</th><th>Total Cost</th><th>Cost/Pkt</th><th>Margin</th></tr></thead>
+      <tbody>${rep.production_report.map(r => `<tr>
+        <td><b>${r.run_number}</b></td><td>${r.product}</td><td>${r.expected_packets}</td><td>${r.actual_packets}</td>
+        <td><span class="badge ${r.yield_flagged ? 'badge-warn' : 'badge-ok'}">${r.yield_variance_pct}%</span></td>
+        <td class="num">₹${r.material_cost.toFixed(2)}</td>
+        <td class="num">₹${(r.labour_cost + r.overhead_cost).toFixed(2)}</td>
+        <td class="num">₹${r.total_cost.toFixed(2)}</td>
+        <td class="num"><b>₹${r.cost_per_packet.toFixed(2)}</b></td>
+        <td class="num">₹${r.margin_per_packet.toFixed(2)} (${r.margin_pct}%)</td>
+      </tr>`).join("")}</tbody></table></div>
+    </div>`;
+}
+
+async function postProductionRun(fgId) {
+  const goods = document.querySelectorAll(".pr-good");
+  const dmgs = document.querySelectorAll(".pr-dmg");
+  const consumptions = [];
+  goods.forEach((g, idx) => {
+    consumptions.push({
+      item_id: parseInt(g.dataset.id),
+      actual_good_qty: parseFloat(g.value),
+      damaged_wastage_qty: parseFloat(dmgs[idx].value)
+    });
+  });
+  try {
+    const res = await apiFetch("/api/production/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        finished_item_id: fgId,
+        batch_multiplier: parseFloat(document.getElementById("prMult").value),
+        actual_output_packets: parseFloat(document.getElementById("prOut").value),
+        labour_cost_rupees: parseFloat(document.getElementById("prLab").value),
+        overhead_cost_rupees: parseFloat(document.getElementById("prOvh").value),
+        consumptions
+      })
+    });
+    await loadMasters();
+    alert(`Run ${res.run_number} posted! Yield Variance: ${res.yield_variance_pct}% | Cost/Packet: ₹${res.cost_per_packet_rupees}`);
+    render();
+  } catch (e) { alert(e.message); }
+}
+
+// 6. Stock Summary & Ledger
+async function renderStock(el) {
+  const rep = await apiFetch("/api/reports/monthly");
+  el.innerHTML = `
+    <div class="card"><h2>📦 Current Stock Summary (Ledger-Derived)</h2><div class="table-wrap"><table>
+      <thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Opening</th><th>Inflows</th><th>Outflows</th><th>Closing</th><th>WAC Rate</th><th>Value (₹)</th></tr></thead>
+      <tbody>${rep.stock_summary.map(s => `<tr>
+        <td>${s.sku}</td><td><b>${s.name}</b></td><td>${s.category}</td>
+        <td class="num">${s.opening} ${s.unit}</td>
+        <td class="num">${s.receipts_or_output}</td>
+        <td class="num">${s.issues_or_sales}</td>
+        <td class="num"><b>${s.closing} ${s.unit}</b></td>
+        <td class="num">₹${s.wac_rate.toFixed(2)}</td>
+        <td class="num">₹${s.closing_value.toFixed(2)}</td>
+      </tr>`).join("")}</tbody></table></div></div>
+    <div class="card"><h3>📜 Immutable Stock Movement Ledger</h3><div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Item</th><th>Movement</th><th>Qty Delta</th><th>Unit Cost</th><th>Source Doc</th><th>Batch</th><th>Notes</th></tr></thead>
+      <tbody>${rep.stock_ledger.map(l => `<tr>
+        <td>${l.date}</td><td>${l.item}</td><td>${l.type}</td>
+        <td class="num" style="color:${l.qty_delta >= 0 ? 'var(--ok)' : 'var(--warn)'}"><b>${l.qty_delta > 0 ? '+' : ''}${l.qty_delta} ${l.unit}</b></td>
+        <td class="num">₹${l.unit_cost.toFixed(2)}</td>
+        <td><b>${l.source_ref}</b></td><td>${l.batch_no}</td><td>${l.notes}</td>
+      </tr>`).join("")}</tbody></table></div></div>`;
+}
+
+// 7. Monthly Auditor Reports
+async function renderReports(el) {
+  const rep = await apiFetch("/api/reports/monthly");
+  el.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h2>📊 Monthly Auditor Pack (${rep.period.start} to ${rep.period.end})</h2>
+        <div>
+          <a href="/api/reports/export/excel"><button class="success">Export Full Excel (.xlsx)</button></a>
+          <a href="/api/reports/export/tally-xml"><button class="secondary">Export Tally XML</button></a>
+        </div>
+      </div>
+      <h3>1. GST Outward Summary (GSTR-1 / GSTR-3B)</h3>
+      <table><thead><tr><th>Supply Type</th><th>Invoices</th><th>Taxable (₹)</th><th>CGST (₹)</th><th>SGST (₹)</th><th>IGST (₹)</th><th>Total (₹)</th></tr></thead>
+      <tbody>${Object.entries(rep.gst_summary).map(([k, v]) => `<tr>
+        <td><b>${k}</b></td><td class="num">${v.invoices}</td><td class="num">₹${v.taxable.toFixed(2)}</td>
+        <td class="num">₹${v.cgst.toFixed(2)}</td><td class="num">₹${v.sgst.toFixed(2)}</td><td class="num">₹${v.igst.toFixed(2)}</td>
+        <td class="num"><b>₹${v.total.toFixed(2)}</b></td>
+      </tr>`).join("")}</tbody></table>
+      <br/><h3>2. Receivables & Ageing</h3>
+      <table><thead><tr><th>Customer</th><th>Invoice #</th><th>Date</th><th>Total (₹)</th><th>Paid (₹)</th><th>Outstanding (₹)</th><th>Ageing</th></tr></thead>
+      <tbody>${rep.receivables_ageing.map(r => `<tr>
+        <td>${r.customer}</td><td>${r.invoice_number}</td><td>${r.invoice_date}</td>
+        <td class="num">₹${r.invoice_total.toFixed(2)}</td><td class="num">₹${r.paid.toFixed(2)}</td>
+        <td class="num"><b style="color:var(--warn)">₹${r.outstanding.toFixed(2)}</b></td><td>${r.ageing_bucket}</td>
+      </tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
+// 8. Owner Dashboard
+async function renderOwnerDashboard(el) {
+  const rep = await apiFetch("/api/reports/monthly");
+  const orders = await apiFetch("/api/orders");
+  const totalSales = rep.sales_register.reduce((s, r) => s + r.grand_total, 0);
+  const totalDue = rep.receivables_ageing.reduce((s, r) => s + r.outstanding, 0);
+  const latestRun = rep.production_report[rep.production_report.length - 1];
+  const fgs = rep.stock_summary.filter(s => s.category === "finished_good");
+  const totalFgPackets = fgs.reduce((sum, item) => sum + item.closing, 0);
+
+  el.innerHTML = `
+    <div class="grid">
+      <div class="card"><div>Monthly Sales (incl. GST)</div><div class="kpi-val">₹${totalSales.toFixed(2)}</div><small>${rep.sales_register.length} invoice(s)</small></div>
+      <div class="card"><div>Outstanding Receivables</div><div class="kpi-val" style="color:var(--warn)">₹${totalDue.toFixed(2)}</div><small>${rep.receivables_ageing.length} open invoice(s)</small></div>
+      <div class="card"><div>Total Finished Goods</div><div class="kpi-val">${totalFgPackets} pkts</div><small>Across ${fgs.length} SKU(s)</small></div>
+      <div class="card"><div>Latest Cost / Packet</div><div class="kpi-val">₹${latestRun ? latestRun.cost_per_packet.toFixed(2) : '—'}</div><small>${latestRun ? latestRun.product : 'Run production to compute'}</small></div>
+    </div>
+    ${latestRun && latestRun.yield_flagged ? `<div class="alert alert-warn">⚠️ Variance Alert (${latestRun.run_number}): Yield variance ${latestRun.yield_variance_pct}% exceeds 3% tolerance!</div>` : ''}
+    <div class="card"><h3>Recent Orders</h3><table><thead><tr><th>Order</th><th>Customer</th><th>Status</th></tr></thead>
+      <tbody>${orders.orders.map(o => `<tr><td>${o.order_number}</td><td>${o.customer_name}</td><td>${o.status}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+// 9. Audit Trail
+async function renderAuditTrail(el) {
+  const data = await apiFetch("/api/audit-logs");
+  el.innerHTML = `<div class="card"><h2>🔒 Immutable System Audit Trail</h2><table>
+    <thead><tr><th>Timestamp (UTC)</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
+    <tbody>${data.logs.map(l => `<tr><td>${l.timestamp}</td><td><b>${l.username}</b></td><td>${l.action}</td><td>${l.entity_type} (${l.entity_id})</td><td>${l.details}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+(async function init() {
+  saveOfflineQueue(getOfflineQueue());
+  await loadMasters();
+  renderTabs();
+  render();
+})();
+</script>
+</body>
+</html>

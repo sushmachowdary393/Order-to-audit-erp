@@ -1,0 +1,8 @@
+{
+  "name": "Kaveri Foods Order-to-Audit",
+  "short_name": "KaveriERP",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#d97706"
+}
