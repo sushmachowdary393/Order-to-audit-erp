@@ -1,0 +1,9 @@
+services:
+  erp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/kaveri_erp.db
+    volumes:
+      - ./data:/app/backend/data
